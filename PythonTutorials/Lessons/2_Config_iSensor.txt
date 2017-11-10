@@ -1,0 +1,122 @@
+
+*** Settings ***
+Library        BuiltIn
+Library        SSHLibrary
+Library        ctpapi.PCSMS			${TestEnvironment}		${ATF_User}
+Suite Teardown		Close All Connections
+
+*** Variables ***
+${isensor_IP}						%{isensor_IP}
+${MINIMUMVERSION}       7.0.0.0
+${MINMSG}               This test is not intended to run on iSensor version:
+${inspector_IP}		172.16.240.39	
+${HOMENET_DEFAULT}=	172.16.0.0/16,10.0.0.0/8,192.168.110.0/24,192.168.114.0/24,192.168.115.0/24	
+${USERNAMEi}		root
+${PASSWORDi}		tester
+
+*** Test Cases ***
+
+Establish Connection to iSensor Mgmt Port
+	Log To Console		IP=${isensor_IP}
+	Open Connection		${isensor_IP}			
+	Login			${USERNAMEi} 			${PASSWORDi}
+	
+
+Set Homenet
+	Get UIN
+	${resp}=		Update Ruleset Variable			${UIN}				HOME_NET		${HOMENET_DEFAULT}	False
+	${success}=		Run Keyword and Return Status		Should Not Contain		${resp}			ERROR
+	Run Keyword Unless	${success}				Fatal Error			Unable to set HOME_NET
+	Run Keyword If		${success}				Log				Successfully configured HOME_NET
+
+	Set Test Message	Successfully configured HOME_NET to ${HOMENET_DEFAULT}
+
+Install Latest Ruleset
+	${rulesetV}=		Get Latest Ruleset Version		balanced
+	${result}=		Deploy Ruleset				balanced			${rulesetV}		${UIN}
+	${success}=		Run Keyword and Return Status		Should Not Contain		${result}		ERROR
+	Run Keyword Unless	${success}				Fatal Error			Unable to deploy latest ruleset
+	Run Keyword If 		${success}				Log				Ruleset balanced.${rulesetV} deployed successfully
+
+	Set Test Message	Ruleset balanced.${rulesetV} deployed successfully
+
+Setup Inspector CA Certificate
+    Configure Inspector CA Certificate
+
+Setup Inspector Configuration
+	${is_configured}=	Run Keyword and Return Status		Verify Agent Config
+	Run Keyword Unless	${is_configured}			Configure Inspector Agent
+	${is_configured}=	Run Keyword and Return Status		Verify Agent Config
+	Run Keyword Unless	${is_configured}			Fatal Error			Unable to configure inspector agent
+	Run Keyword If		${is_configured}			Log				Successfully configured inspector agent to ${inspector_IP}
+
+	Set Test Message	Successfully configured inspector agent to ${inspector_IP}	
+
+
+*** Keywords ***
+Configure Inspector CA Certificate
+    ${resp}=		Execute Command							ISSUER_HASH=`openssl x509 -issuer_hash -in /opt/inspector/etc/certs/inspector.crt -noout`
+    ${resp}=		Execute Command							INSPECTOR_CA="/opt/inspector/etc/certs/$ISSUER_HASH.0"
+    ${resp}=		Write								    cd /secureworks/certs\n
+    ${resp}=		Execute Command							rm -rf TrustedMSSCA.pem 2>&1
+    SSHLibrary.put file                                     master_inspector_ca_cert  /tmp
+    file should exist                                       /tmp/master_inspector_ca_cert
+    ${resp}=		Execute Command							mv /tmp/master_inspector_ca_cert $INSPECTOR_CA  2>&1
+    ${resp}=		Execute Command							ln -s $INSPECTOR_CA TrustedMSSCA.pem 2>&1
+
+
+Test RFlib SSH Connection
+	${result}=		Execute Command							/secureworks/bin/sw-info.sh
+	LOG			${result}
+	Should Contain          ${result}							SYSTEM INFORMATION
+	Should Contain          ${result}                       			        ${isensor_IP}
+
+Configure Inspector Agent
+	${resp}=		Write								cd /opt/inspector/bin/\n
+	${read}=		Read
+	${resp}=		Write								pwd\n
+	${resp}=		Read								delay=0.5s	
+	Should Contain		${resp}								/opt/inspector/bin
+	${resp}=		Write								printf "${inspector_IP}\n\n\n\nn\ny\n" > /opt/inspector/bin/atfdialog
+	${resp}=		Read								delay=0.5s
+	${resp}			Write								../setup/setup.sh < atfdialog 	
+	${resp}=		Read								delay=0.5s
+	Log			${resp}
+	${resp}=		Execute Command							rm -f /opt/inspector/bin/atfdialog 2>&1
+	
+Get UIN
+	${uin}			${stderr}=		Execute Command				cat /var/iSensor/uin	return_stderr=True
+	Should Not Contain	${uin}			No such file
+	Set Suite Variable	${UIN}			${uin}			
+Garbage
+	Write			..setup/setup.sh\n
+	${resp}=		Read 	#Until							Enter:
+	Log			Setting Primary Inspector to ${INSPECTOR_PRIMARY_ADDR}
+	Write			${INSPECTOR_PRIMARY_ADDR}
+	${resp}=		Read 	#Until							Enter:
+	Log			Setting Secondary Inspector to empty
+	Write Bare		\n
+	${resp}=		Read Until			        	                Enter:
+	Log                     Leaving port setting at default:
+	Write Bare              \n
+	${resp}=		Read Until							Enter:
+	Log                     Leaving report destination address at default:
+	Write Bare              \n
+	${resp}=		Read Until							Enter:
+	Log			Setting agent NOT to be an internal scanner
+	Write			n
+	${resp}=		Read Until							Do you want to start this Inspector Agent?
+	Log			Starting agent
+	Write			y
+
+Verify Agent Config
+        ${resp}=                Execute Command         ls /opt/inspector/etc/agent.ini
+        Should Not Contain      ${resp}                 No such file or directory
+        ${resp}=                Execute Command         cat /opt/inspector/etc/master.ini |pcregrep "Primary=(\\d{1,3}\\.){3}\\d{1,3}"
+        Should Not Contain      ${resp}                 No such file or directory
+        Should Not Be Empty     ${resp}
+
+		
+	
+	
+	
