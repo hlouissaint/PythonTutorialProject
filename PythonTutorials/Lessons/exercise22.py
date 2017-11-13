@@ -15,3 +15,4 @@ except IOError :
     print ("Error: cannot find file or read data...")
 else:
     print ("File is read successfully...")
+    print("File is read successfully...")
