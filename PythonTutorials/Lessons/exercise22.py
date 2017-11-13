@@ -7,6 +7,7 @@ try:
         fhw.write("This is a test for file exception handling...")
 except IOError:
     print("Error: cannot find file or write data...")
+    print("Error: cannot find file or write data...")
 
 try:
     with open("testfile.txt", "r") as fhr:
